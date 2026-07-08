@@ -1,0 +1,11 @@
+.git
+.gitignore
+.prettierrc
+node_modules
+dist
+coverage
+**/*.spec.ts
+**/*.e2e-spec.ts
+test/
+README.md
+*.md
