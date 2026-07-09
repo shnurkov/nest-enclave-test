@@ -1,0 +1,10 @@
+version: v1
+name: "enclaver"
+target: "enclaver:latest"
+sources:
+  app: "app-enclave:latest"
+defaults:
+  memory_mb: 1000
+  cpu_count: 1
+ingress:
+  - listen_port: 4545
