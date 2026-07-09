@@ -10,7 +10,7 @@ import {
 @Injectable()
 export class KmsService {
   private readonly client = new KMSClient({
-    region: process.env.AWS_REGION,
+    region: 'eu-central-1', // process.env.AWS_REGION,
     // Enclaver injects AWS_KMS_ENDPOINT inside the enclave so requests go
     // through its KMS proxy (attestation is attached transparently there).
     // Outside the enclave the variable is unset and the SDK talks to KMS directly.
