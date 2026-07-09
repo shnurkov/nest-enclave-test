@@ -14,16 +14,18 @@ NestJS-приложение для тестирования операций AWS
 
 `Dockerfile` собирает приложение в три стадии (зависимости → сборка → продакшн-рантайм на `node:20-alpine`) и на выходе даёт образ, который слушает `4545` и запускает `node dist/main.js`.
 
-Имя образа должно совпадать со значением `sources.app` в `enclaver.yaml` — сейчас это `app-enclave:latest`:
+Имя образа должно совпадать со значением `sources.app` в `enclaver.yaml` — сейчас это `app-enclave:latest`.
+
+`enclaver run` не умеет передавать переменные окружения внутрь энклава (нет такого флага), поэтому `AWS_REGION` нужно зашить в сам образ ещё на этапе `docker build` — через `--build-arg`:
 
 ```bash
-docker build -t app-enclave:latest .
+docker build --build-arg AWS_REGION=eu-central-1 -t app-enclave:latest .
 ```
 
-Проверить образ локально можно так:
+Проверить образ локально можно так (здесь, наоборот, `-e` работает, т.к. это обычный `docker run`, а не энклав):
 
 ```bash
-docker run --rm -p 4545:4545 app-enclave:latest
+docker run --rm -p 4545:4545 -e AWS_REGION=eu-central-1 app-enclave:latest
 ```
 
 ## 2. Сборка образа энклава (Enclaver)
@@ -67,7 +69,7 @@ enclaver build
 ## 3. Полная сборка одной командой
 
 ```bash
-docker build -t app-enclave:latest . && enclaver build
+docker build --build-arg AWS_REGION=eu-central-1 -t app-enclave:latest . && enclaver build
 ```
 
 ## Запуск энклава
@@ -82,8 +84,20 @@ enclaver run --dev enclaver:latest
 
 ## Переменные окружения
 
+При старте (`src/main.ts`) приложение логирует текущие значения `PORT`/`AWS_REGION`/`AWS_KMS_ENDPOINT` — удобно сверять, что реально прокинуто внутрь энклава, не подключаясь к нему отдельно.
+
+- `PORT` — порт, который слушает NestJS (по умолчанию `4545`, см. `Dockerfile`/`enclaver.yaml`).
 - `AWS_REGION` — регион KMS.
-- `AWS_KMS_ENDPOINT` — не задаётся вручную, Enclaver прокидывает её сам внутри энклава (см. `kms_proxy` выше). Вне энклава переменная не установлена, и SDK ходит в KMS напрямую по обычной credential chain — удобно для локальной отладки без Enclaver.
+  - Локально (без Docker) — берётся из `.env` (см. `.env.example`).
+  - Для `docker run` напрямую — обычный `-e AWS_REGION=...` работает.
+  - **Для энклава — только через `--build-arg` при `docker build`** (см. шаг 1 выше). `enclaver run` не пробрасывает переменные окружения внутрь энклава, значение должно быть зашито в образ `app-enclave:latest` ещё до `enclaver build`, иначе внутри энклава `AWS_REGION` будет `undefined`.
+- `AWS_KMS_ENDPOINT` — **не задавать вручную**. Enclaver сам прокидывает её внутри энклава (см. `kms_proxy` выше, `http://127.0.0.1:<kms_proxy.listen_port>`). Вне энклава переменная не установлена, и SDK ходит в KMS напрямую по обычной credential chain — удобно для локальной отладки без Enclaver.
+
+### AWS-креды приложению внутри энклава не нужны
+
+У энклава есть только loopback-интерфейс — сходить в IMDS (`169.254.169.254`) самому приложению неоткуда, и это ожидаемо, а не баг конфигурации. KMS proxy (`odyn`) не проверяет подпись входящего запроса — он извлекает из неё только регион/сервис, отбрасывает её и переподписывает запрос собственными (настоящими) кредами, которые сам получает на стороне хоста, перед отправкой в реальный KMS.
+
+Поэтому `src/kms/kms.service.ts` при наличии `AWS_KMS_ENDPOINT` передаёт в `KMSClient` статичные placeholder-креды (`accessKeyId`/`secretAccessKey`) вместо стандартной provider chain — SDK-у нужно лишь синтаксически собрать SigV4-заголовок, реальные креды всё равно отбрасываются прокси. Настоящие AWS-креды нужны только **хосту** (EC2-инстансу, на котором запущен `enclaver run`) — через привязанный IAM instance profile с правами `kms:GenerateDataKeyPair`/`kms:Decrypt`/`kms:DescribeKey`.
 
 ## Тестовые эндпоинты
 

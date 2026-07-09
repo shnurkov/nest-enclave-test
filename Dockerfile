@@ -19,7 +19,11 @@ FROM node:20-alpine AS runner
 RUN corepack enable && corepack prepare pnpm@10 --activate
 WORKDIR /app
 
+# enclaver run has no flag to pass env vars into the enclave, so AWS_REGION
+# must be baked into this image before `enclaver build` wraps it into an EIF.
+ARG AWS_REGION
 ENV NODE_ENV=production
+ENV AWS_REGION=${AWS_REGION}
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/package.json ./
 COPY --from=build /app/pnpm-lock.yaml* ./
