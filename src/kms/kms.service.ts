@@ -6,6 +6,7 @@ import {
   GenerateDataKeyPairCommandInput,
   KMSClient,
 } from '@aws-sdk/client-kms';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 
 @Injectable()
 export class KmsService {
@@ -18,13 +19,46 @@ export class KmsService {
     // ...(process.env.AWS_KMS_ENDPOINT && {
     //   endpoint: process.env.AWS_KMS_ENDPOINT,
     // }),
+    // Default IMDS timeout/retries are too tight for the extra vsock hop
+    // between the enclave and the host's network stack.
+    credentials: fromNodeProviderChain({
+      timeout: 5000,
+      maxRetries: 3,
+      logger: console,
+    }),
+    logger: console,
   });
 
-  generateDataKeyPair(input: GenerateDataKeyPairCommandInput) {
-    return this.client.send(new GenerateDataKeyPairCommand(input));
+  async generateDataKeyPair(input: GenerateDataKeyPairCommandInput) {
+    try {
+      return await this.client.send(new GenerateDataKeyPairCommand(input));
+    } catch (error) {
+      this.logError('generateDataKeyPair', error);
+      throw error;
+    }
   }
 
-  decrypt(input: DecryptCommandInput) {
-    return this.client.send(new DecryptCommand(input));
+  async decrypt(input: DecryptCommandInput) {
+    try {
+      return await this.client.send(new DecryptCommand(input));
+    } catch (error) {
+      this.logError('decrypt', error);
+      throw error;
+    }
+  }
+
+  private logError(operation: string, error: unknown) {
+    const err = error as {
+      name?: string;
+      message?: string;
+      $metadata?: unknown;
+      stack?: string;
+    };
+    console.error(`KMS ${operation} failed`, {
+      name: err?.name,
+      message: err?.message,
+      metadata: err?.$metadata,
+      stack: err?.stack,
+    });
   }
 }
