@@ -10,6 +10,8 @@ NestJS-приложение для тестирования операций AWS
 - [Enclaver CLI](https://github.com/edgebitio/enclaver) (`enclaver`) — используется для сборки образа энклава из обычного Docker-образа
 - Для запуска и работы самого энклава (не для сборки) — инстанс EC2 с поддержкой Nitro Enclaves
 
+Примечание: EIF (Enclave Image File), который создаёт `enclaver build`, привязан к архитектуре CPU (x86_64/arm64) машины сборки — поэтому собирать образ нужно на той же архитектуре, что и у целевого EC2-инстанса с Nitro Enclaves (например, x86_64-хост для `c6a.xlarge`, arm64 — для Graviton-инстансов).
+
 ## 1. Сборка Docker-образа приложения
 
 `Dockerfile` собирает приложение в три стадии (зависимости → сборка → продакшн-рантайм на `node:20-alpine`) и на выходе даёт образ, который слушает `4545` и запускает `node dist/main.js`.
@@ -58,10 +60,10 @@ egress:
 - `kms_proxy.listen_port` — порт, на котором Enclaver внутри энклава поднимает локальный KMS proxy. Enclaver сам прокидывает в окружение приложения `AWS_KMS_ENDPOINT=http://127.0.0.1:8000`, добавляет attestation document к запросам `Decrypt`/`GenerateDataKeyPair` и прозрачно расшифровывает ответ KMS — приложению не нужно ничего знать про attestation, достаточно обычного AWS SDK. **Этот порт не должен попадать в `ingress`**, иначе расшифровка станет доступна снаружи энклава.
 - `egress.allow` — разрешает энклаву обращаться к `kms.*.amazonaws.com` (сам KMS proxy ходит наружу) и к `169.254.169.254` (IMDS, нужен SDK для получения AWS credentials/региона по умолчанию)
 
-Собрать образ энклава (`enclaver.yaml` должен находиться в текущей директории):
+Собрать образ энклава:
 
 ```bash
-enclaver build
+enclaver build -f enclaver.yaml
 ```
 
 Команда возьмёт образ `app-enclave:latest`, обернёт его в EIF (Enclave Image File) и создаст итоговый Docker-образ `enclaver:latest`, который уже содержит артефакт энклава.
@@ -69,7 +71,7 @@ enclaver build
 ## 3. Полная сборка одной командой
 
 ```bash
-docker build --build-arg AWS_REGION=eu-central-1 -t app-enclave:latest . && enclaver build
+docker build --build-arg AWS_REGION=eu-central-1 -t app-enclave:latest . && enclaver build -f enclaver.yaml
 ```
 
 ## Запуск энклава
@@ -77,21 +79,21 @@ docker build --build-arg AWS_REGION=eu-central-1 -t app-enclave:latest . && encl
 Локальный тестовый запуск (эмуляция, без реального Nitro-энклава):
 
 ```bash
-enclaver run --dev enclaver:latest
+enclaver run --publish 4545:4545 enclaver:latest
 ```
 
-Для запуска в реальном AWS Nitro Enclave образ `enclaver:latest` нужно задеплоить на EC2-инстанс с поддержкой Nitro Enclaves — см. документацию [Enclaver](https://github.com/edgebitio/enclaver) и [AWS Nitro Enclaves](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave.html).
+Для запуска в реальном AWS Nitro Enclave образ `enclaver:latest` нужно задеплоить на EC2-инстанс с поддержкой Nitro Enclaves — см. документацию [Enclaver](https://web.archive.org/web/20250512080506/https://enclaver.io/docs/0.x/guide-app/) и [AWS Nitro Enclaves](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave.html).
 
 ## Переменные окружения
 
-При старте (`src/main.ts`) приложение логирует текущие значения `PORT`/`AWS_REGION`/`AWS_KMS_ENDPOINT` — удобно сверять, что реально прокинуто внутрь энклава, не подключаясь к нему отдельно.
+При старте (`src/main.ts`) приложение логирует текущие значения `PORT`/`AWS_REGION`/`AWS_KMS_ENDPOINT`.
 
 - `PORT` — порт, который слушает NestJS (по умолчанию `4545`, см. `Dockerfile`/`enclaver.yaml`).
 - `AWS_REGION` — регион KMS.
   - Локально (без Docker) — берётся из `.env` (см. `.env.example`).
   - Для `docker run` напрямую — обычный `-e AWS_REGION=...` работает.
   - **Для энклава — только через `--build-arg` при `docker build`** (см. шаг 1 выше). `enclaver run` не пробрасывает переменные окружения внутрь энклава, значение должно быть зашито в образ `app-enclave:latest` ещё до `enclaver build`, иначе внутри энклава `AWS_REGION` будет `undefined`.
-- `AWS_KMS_ENDPOINT` — **не задавать вручную**. Enclaver сам прокидывает её внутри энклава (см. `kms_proxy` выше, `http://127.0.0.1:<kms_proxy.listen_port>`). Вне энклава переменная не установлена, и SDK ходит в KMS напрямую по обычной credential chain — удобно для локальной отладки без Enclaver.
+- `AWS_KMS_ENDPOINT` — **не задавать вручную**. Enclaver сам прокидывает её внутри энклава (см. `kms_proxy` выше, `http://127.0.0.1:<kms_proxy.listen_port>`). Вне энклава переменная не установлена, и SDK ходит в KMS напрямую по обычной credential chain.
 
 ### AWS-креды приложению внутри энклава не нужны
 
