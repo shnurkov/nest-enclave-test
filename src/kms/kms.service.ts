@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   DecryptCommand,
   DecryptCommandInput,
@@ -9,6 +9,8 @@ import {
 
 @Injectable()
 export class KmsService {
+  private readonly logger = new Logger(KmsService.name);
+
   private readonly client = new KMSClient({
     region: process.env.AWS_REGION,
     // Enclaver injects AWS_KMS_ENDPOINT inside the enclave so requests go
@@ -49,17 +51,10 @@ export class KmsService {
   }
 
   private logError(operation: string, error: unknown) {
-    const err = error as {
-      name?: string;
-      message?: string;
-      $metadata?: unknown;
-      stack?: string;
-    };
-    console.error(`KMS ${operation} failed`, {
-      name: err?.name,
-      message: err?.message,
-      metadata: err?.$metadata,
-      stack: err?.stack,
-    });
+    const err = error as { name?: string; message?: string; stack?: string };
+    this.logger.error(
+      `KMS ${operation} failed: ${err?.name ?? 'Error'}: ${err?.message ?? String(error)}`,
+      err?.stack,
+    );
   }
 }
